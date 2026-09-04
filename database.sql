@@ -8,12 +8,24 @@ CREATE TABLE IF NOT EXISTS reviews (
     title VARCHAR(180) NOT NULL,
     review_text TEXT NOT NULL,
     photo_path VARCHAR(255) DEFAULT NULL,
-    status ENUM('pending','approved') NOT NULL DEFAULT 'pending',
+    status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
     featured TINYINT(1) NOT NULL DEFAULT 0,
+    consented_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    approved_at TIMESTAMP NULL DEFAULT NULL,
+    moderated_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_status_created (status, created_at),
     INDEX idx_featured (featured)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS review_moderation_log (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    review_id INT UNSIGNED NOT NULL,
+    action VARCHAR(30) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_review_created (review_id, created_at),
+    CONSTRAINT fk_moderation_review FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO reviews

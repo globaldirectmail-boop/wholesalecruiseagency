@@ -1,8 +1,11 @@
 <?php
 require __DIR__ . '/config.php';
 
-$reviews = db()->query("SELECT customer_name, cruise_line, trip_name, rating, title, review_text, photo_path, created_at FROM reviews WHERE status = 'approved' ORDER BY featured DESC, created_at DESC LIMIT 24")->fetchAll();
+$reviews = db()->query("SELECT customer_name, cruise_line, trip_name, rating, title, review_text, photo_path, created_at FROM reviews WHERE status = 'approved' ORDER BY featured DESC, approved_at DESC, created_at DESC LIMIT 24")->fetchAll();
+$summary = db()->query("SELECT COUNT(*) AS total, COALESCE(AVG(rating), 0) AS average FROM reviews WHERE status = 'approved'")->fetch();
 $submitted = isset($_GET['submitted']);
+$errors = flash('review_errors') ?: [];
+$old = flash('review_old') ?: [];
 ?>
 <!doctype html>
 <html lang="en">
@@ -13,6 +16,7 @@ $submitted = isset($_GET['submitted']);
     <meta name="description" content="Read verified customer reviews and share your experience with Wholesale Cruise Agency.">
     <link rel="canonical" href="<?= SITE_URL ?>">
     <link rel="stylesheet" href="assets/style.css">
+    <style>.website-field{position:absolute!important;left:-10000px!important;width:1px!important;height:1px!important;overflow:hidden!important}.notice.error{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}</style>
 </head>
 <body>
 <header class="site-header">
@@ -35,9 +39,9 @@ $submitted = isset($_GET['submitted']);
                 <div class="hero-actions"><a class="button" href="#reviews">Read Reviews</a><a class="button button-secondary" href="#write-review">Share Your Experience</a></div>
             </div>
             <div class="rating-panel" aria-label="Customer rating summary">
-                <div class="big-rating">5.0</div>
-                <div class="stars">★★★★★</div>
-                <p>Based on approved customer reviews</p>
+                <div class="big-rating"><?= $summary['total'] ? e(number_format((float)$summary['average'], 1)) : '—' ?></div>
+                <div class="stars" aria-label="<?= $summary['total'] ? e(number_format((float)$summary['average'], 1)) . ' out of 5 stars' : 'No ratings yet' ?>">★★★★★</div>
+                <p><?= (int)$summary['total'] ?> approved customer review<?= (int)$summary['total'] === 1 ? '' : 's' ?></p>
                 <div class="trust-row"><span>✓ Personal service</span><span>✓ Cruise expertise</span><span>✓ Wholesale value</span></div>
             </div>
         </div>
@@ -45,6 +49,9 @@ $submitted = isset($_GET['submitted']);
 
     <?php if ($submitted): ?>
         <div class="container"><div class="notice success">Thank you! Your review was received and will appear after approval.</div></div>
+    <?php endif; ?>
+    <?php if ($errors): ?>
+        <div class="container"><div class="notice error" role="alert"><strong>Please correct the following:</strong><ul><?php foreach ($errors as $error): ?><li><?= e($error) ?></li><?php endforeach; ?></ul></div></div>
     <?php endif; ?>
 
     <section id="reviews" class="section">
@@ -84,21 +91,23 @@ $submitted = isset($_GET['submitted']);
             </div>
             <form action="submit.php" method="post" enctype="multipart/form-data" class="review-form">
                 <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="form_started_at" value="<?= time() ?>">
+                <label class="website-field" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
                 <div class="field-row">
-                    <label>Full name<input name="customer_name" required maxlength="120" autocomplete="name"></label>
-                    <label>Email address<input type="email" name="customer_email" required maxlength="190" autocomplete="email"></label>
+                    <label>Full name<input name="customer_name" required maxlength="120" autocomplete="name" value="<?= e($old['customer_name'] ?? '') ?>"></label>
+                    <label>Email address<input type="email" name="customer_email" required maxlength="190" autocomplete="email" value="<?= e($old['customer_email'] ?? '') ?>"></label>
                 </div>
                 <div class="field-row">
-                    <label>Cruise line<input name="cruise_line" maxlength="120" placeholder="Viking, Royal Caribbean, etc."></label>
-                    <label>Trip or destination<input name="trip_name" maxlength="180" placeholder="Alaska, Mediterranean, Caribbean..."></label>
+                    <label>Cruise line<input name="cruise_line" maxlength="120" placeholder="Viking, Royal Caribbean, etc." value="<?= e($old['cruise_line'] ?? '') ?>"></label>
+                    <label>Trip or destination<input name="trip_name" maxlength="180" placeholder="Alaska, Mediterranean, Caribbean..." value="<?= e($old['trip_name'] ?? '') ?>"></label>
                 </div>
                 <fieldset class="rating-field"><legend>Your rating</legend><div class="rating-options">
-                    <?php for ($i = 5; $i >= 1; $i--): ?><label><input type="radio" name="rating" value="<?= $i ?>" <?= $i === 5 ? 'checked' : '' ?>><span><?= $i ?> ★</span></label><?php endfor; ?>
+                    <?php for ($i = 5; $i >= 1; $i--): ?><label><input type="radio" name="rating" value="<?= $i ?>" <?= $i === (int)($old['rating'] ?? 5) ? 'checked' : '' ?>><span><?= $i ?> ★</span></label><?php endfor; ?>
                 </div></fieldset>
-                <label>Review title<input name="title" required maxlength="180" placeholder="Summarize your experience"></label>
-                <label>Your review<textarea name="review_text" required minlength="20" maxlength="3000" rows="6" placeholder="What stood out? How did our team help?"></textarea></label>
+                <label>Review title<input name="title" required maxlength="180" placeholder="Summarize your experience" value="<?= e($old['title'] ?? '') ?>"></label>
+                <label>Your review<textarea name="review_text" required minlength="20" maxlength="3000" rows="6" placeholder="What stood out? How did our team help?"><?= e($old['review_text'] ?? '') ?></textarea></label>
                 <label>Photo <span class="optional">(optional, JPG/PNG/WebP up to 3 MB)</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp"></label>
-                <label class="check"><input type="checkbox" required><span>I confirm this review reflects my genuine experience.</span></label>
+                <label class="check"><input type="checkbox" name="consent" value="1" required <?= !empty($old['consent']) ? 'checked' : '' ?>><span>I confirm this review reflects my genuine experience and may be published.</span></label>
                 <button class="button" type="submit">Submit Review</button>
             </form>
         </div>
