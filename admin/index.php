@@ -7,32 +7,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = (int)($_POST['id'] ?? 0);
     $action = (string)($_POST['action'] ?? '');
 
-    if ($id > 0) {
-        if ($action === 'approve') {
-            db()->prepare("UPDATE reviews SET status='approved' WHERE id=?")->execute([$id]);
-        } elseif ($action === 'unapprove') {
-            db()->prepare("UPDATE reviews SET status='pending', featured=0 WHERE id=?")->execute([$id]);
-        } elseif ($action === 'feature') {
-            db()->prepare("UPDATE reviews SET featured=1, status='approved' WHERE id=?")->execute([$id]);
-        } elseif ($action === 'unfeature') {
-            db()->prepare("UPDATE reviews SET featured=0 WHERE id=?")->execute([$id]);
-        } elseif ($action === 'delete') {
-            $stmt = db()->prepare('SELECT photo_path FROM reviews WHERE id=?');
+    $allowedActions = ['approve', 'reject', 'unapprove', 'feature', 'unfeature', 'delete'];
+    if ($id > 0 && in_array($action, $allowedActions, true)) {
+        $pdo = db();
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare('SELECT photo_path FROM reviews WHERE id=? FOR UPDATE');
             $stmt->execute([$id]);
             $review = $stmt->fetch();
-            db()->prepare('DELETE FROM reviews WHERE id=?')->execute([$id]);
-            if ($review && !empty($review['photo_path'])) {
+            if (!$review) throw new RuntimeException('Review not found.');
+
+        if ($action === 'approve') {
+            $pdo->prepare("UPDATE reviews SET status='approved', approved_at=COALESCE(approved_at, NOW()), moderated_at=NOW() WHERE id=?")->execute([$id]);
+        } elseif ($action === 'reject') {
+            $pdo->prepare("UPDATE reviews SET status='rejected', featured=0, moderated_at=NOW() WHERE id=?")->execute([$id]);
+        } elseif ($action === 'unapprove') {
+            $pdo->prepare("UPDATE reviews SET status='pending', featured=0, approved_at=NULL, moderated_at=NOW() WHERE id=?")->execute([$id]);
+        } elseif ($action === 'feature') {
+            $pdo->prepare("UPDATE reviews SET featured=1, status='approved', approved_at=COALESCE(approved_at, NOW()), moderated_at=NOW() WHERE id=?")->execute([$id]);
+        } elseif ($action === 'unfeature') {
+            $pdo->prepare("UPDATE reviews SET featured=0, moderated_at=NOW() WHERE id=?")->execute([$id]);
+        }
+
+        if ($action !== 'delete') {
+            $pdo->prepare('INSERT INTO review_moderation_log (review_id, action) VALUES (?, ?)')->execute([$id, $action]);
+        } else {
+            $pdo->prepare('DELETE FROM reviews WHERE id=?')->execute([$id]);
+        }
+        $pdo->commit();
+
+            if ($action === 'delete' && !empty($review['photo_path']) && preg_match('#^uploads/[a-f0-9]{32}\.(?:jpg|png|webp)$#', $review['photo_path'])) {
                 $path = dirname(__DIR__) . '/' . $review['photo_path'];
                 if (is_file($path)) unlink($path);
             }
+            flash('admin_notice', ucfirst($action) . ' completed.');
+        } catch (Throwable $exception) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            flash('admin_error', $exception->getMessage());
         }
     }
-    header('Location: index.php');
-    exit;
+    redirect('index.php');
 }
 
 $reviews = db()->query('SELECT * FROM reviews ORDER BY status ASC, featured DESC, created_at DESC')->fetchAll();
 $pending = count(array_filter($reviews, fn($r) => $r['status'] === 'pending'));
+$notice = flash('admin_notice');
+$adminError = flash('admin_error');
 ?>
 <!doctype html>
 <html lang="en">
@@ -42,10 +62,13 @@ $pending = count(array_filter($reviews, fn($r) => $r['status'] === 'pending'));
     <meta name="robots" content="noindex,nofollow">
     <title>Review Dashboard | <?= e(SITE_NAME) ?></title>
     <link rel="stylesheet" href="../assets/style.css">
+    <style>.notice.error{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}.badge-rejected{background:#fef2f2;color:#991b1b}</style>
 </head>
 <body class="admin-shell">
 <header class="admin-header"><div class="container"><strong>Review Dashboard</strong><div><a href="../index.php" target="_blank">View Site</a> &nbsp; · &nbsp; <a href="logout.php">Sign Out</a></div></div></header>
 <main class="container admin-main">
+    <?php if ($notice): ?><div class="notice success" role="status"><?= e($notice) ?></div><?php endif; ?>
+    <?php if ($adminError): ?><div class="notice error" role="alert"><?= e($adminError) ?></div><?php endif; ?>
     <div class="section-heading"><div><span class="eyebrow">Moderation</span><h1>Customer Reviews</h1><p><?= $pending ?> pending · <?= count($reviews) ?> total</p></div></div>
     <div class="admin-card" style="overflow-x:auto">
         <table class="admin-table">
@@ -58,7 +81,8 @@ $pending = count(array_filter($reviews, fn($r) => $r['status'] === 'pending'));
                     <td><span class="badge badge-<?= e($review['status']) ?>"><?= e(ucfirst($review['status'])) ?></span><?php if ($review['featured']): ?><br><span class="badge" style="background:#fff7d6;color:#854d0e;margin-top:6px">Featured</span><?php endif; ?></td>
                     <td><?= e(date('M j, Y', strtotime($review['created_at']))) ?></td>
                     <td><div class="admin-actions">
-                        <?php if ($review['status'] === 'pending'): ?><form method="post"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><input type="hidden" name="id" value="<?= (int)$review['id'] ?>"><button class="button button-small" name="action" value="approve">Approve</button></form><?php else: ?><form method="post"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><input type="hidden" name="id" value="<?= (int)$review['id'] ?>"><button class="button button-small button-muted" name="action" value="unapprove">Unpublish</button></form><?php endif; ?>
+                        <?php if ($review['status'] !== 'approved'): ?><form method="post"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><input type="hidden" name="id" value="<?= (int)$review['id'] ?>"><button class="button button-small" name="action" value="approve">Approve</button></form><?php else: ?><form method="post"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><input type="hidden" name="id" value="<?= (int)$review['id'] ?>"><button class="button button-small button-muted" name="action" value="unapprove">Unpublish</button></form><?php endif; ?>
+                        <?php if ($review['status'] === 'pending'): ?><form method="post"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><input type="hidden" name="id" value="<?= (int)$review['id'] ?>"><button class="button button-small button-danger" name="action" value="reject">Reject</button></form><?php endif; ?>
                         <?php if ($review['featured']): ?><form method="post"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><input type="hidden" name="id" value="<?= (int)$review['id'] ?>"><button class="button button-small button-muted" name="action" value="unfeature">Unfeature</button></form><?php else: ?><form method="post"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><input type="hidden" name="id" value="<?= (int)$review['id'] ?>"><button class="button button-small button-secondary" name="action" value="feature">Feature</button></form><?php endif; ?>
                         <form method="post" onsubmit="return confirm('Permanently delete this review?')"><input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>"><input type="hidden" name="id" value="<?= (int)$review['id'] ?>"><button class="button button-small button-danger" name="action" value="delete">Delete</button></form>
                     </div></td>
