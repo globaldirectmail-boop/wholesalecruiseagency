@@ -10,15 +10,26 @@ $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $password = (string)($_POST['password'] ?? '');
-    $configuredPassword = env_value('ADMIN_PASSWORD', 'change-this-password');
+    $configuredPassword = admin_password();
+    $attempts = array_values(array_filter($_SESSION['login_attempts'] ?? [], fn($time) => $time > time() - 900));
 
-    if (hash_equals($configuredPassword, $password)) {
+    if (count($attempts) >= 5) {
+        http_response_code(429);
+        $error = 'Too many sign-in attempts. Please wait 15 minutes.';
+    } elseif ($configuredPassword === '') {
+        http_response_code(503);
+        $error = 'Administrator access is disabled until ADMIN_PASSWORD is configured.';
+    } elseif (hash_equals($configuredPassword, $password)) {
         session_regenerate_id(true);
         $_SESSION['admin_logged_in'] = true;
+        unset($_SESSION['login_attempts']);
         header('Location: index.php');
         exit;
+    } else {
+        $attempts[] = time();
+        $_SESSION['login_attempts'] = $attempts;
+        $error = 'Incorrect password.';
     }
-    $error = 'Incorrect password.';
 }
 ?>
 <!doctype html>
