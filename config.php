@@ -1,6 +1,12 @@
 <?php
 declare(strict_types=1);
 
+ini_set('session.use_strict_mode', '1');
+ini_set('session.cookie_httponly', '1');
+ini_set('session.cookie_samesite', 'Lax');
+if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+    ini_set('session.cookie_secure', '1');
+}
 session_start();
 
 const SITE_NAME = 'Wholesale Cruise Agency Reviews';
@@ -58,6 +64,28 @@ function verify_csrf(): void
         http_response_code(419);
         exit('Invalid request token. Please go back and try again.');
     }
+}
+
+function redirect(string $location): void
+{
+    header('Location: ' . $location, true, 303);
+    exit;
+}
+
+function flash(string $key, mixed $value = null): mixed
+{
+    if (func_num_args() === 2) {
+        $_SESSION['flash'][$key] = $value;
+        return null;
+    }
+    $result = $_SESSION['flash'][$key] ?? null;
+    unset($_SESSION['flash'][$key]);
+    return $result;
+}
+
+function admin_password(): string
+{
+    return env_value('ADMIN_PASSWORD');
 }
 
 function is_admin(): bool
