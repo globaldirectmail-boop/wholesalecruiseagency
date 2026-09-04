@@ -9,7 +9,8 @@ A responsive PHP/MySQL customer-review website for **www.wholesalecruiseagencyre
 - Optional JPG, PNG, or WebP customer photo upload
 - Pending-review moderation workflow
 - Password-protected administrator dashboard
-- Approve, unpublish, feature, unfeature, and delete controls
+- Approve, reject, unpublish, feature, unfeature, and delete controls
+- Moderation timestamps and audit history
 - CSRF protection, prepared SQL statements, output escaping, upload validation
 - SEO title, description, canonical URL, and mobile-friendly markup
 
@@ -40,13 +41,11 @@ ADMIN_PASSWORD=choose-a-strong-admin-password
 
 ## Important security step
 
-The application contains a temporary fallback administrator password of:
+Administrator access stays disabled until `ADMIN_PASSWORD` is set. Use a strong, unique password before testing the moderation dashboard.
 
-```text
-change-this-password
-```
+## Upgrading an existing installation
 
-Set the `ADMIN_PASSWORD` environment variable before making the site public. Do not use the fallback password in production.
+Back up the database, then run `migrate-2026-09-review-workflow.sql` once. New installations only need `database.sql`.
 
 ## Main files
 
